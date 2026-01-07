@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  teams-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: teams-mcp-server:latest
+    container_name: teams-mcp-server
+
+    # Umgebungsvariablen aus .env laden
+    env_file:
+      - .env
+
+    # Alternativ: Direkt Umgebungsvariablen setzen
+    # environment:
+    #   - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+    #   - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+    #   - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+    #   - BOT_ID=${BOT_ID}
+    #   - BOT_PASSWORD=${BOT_PASSWORD}
+
+    # Restart-Policy
+    restart: unless-stopped
+
+    # STDIN und TTY für MCP Server (wichtig!)
+    stdin_open: true
+    tty: true
+
+    # Logging-Konfiguration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Ressourcen-Limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    # Netzwerk (optional, für mehrere Services)
+    # networks:
+    #   - teams-network
+
+# Optional: Separates Netzwerk
+# networks:
+#   teams-network:
+#     driver: bridge
