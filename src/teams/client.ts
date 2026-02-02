@@ -1,5 +1,5 @@
 import { Client } from "@microsoft/microsoft-graph-client";
-import { ClientSecretCredential, DeviceCodeCredential, TokenCachePersistenceOptions } from "@azure/identity";
+import { ClientSecretCredential, DeviceCodeCredential } from "@azure/identity";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -75,38 +75,19 @@ export class TeamsClient {
           console.error("\n=== DEVICE LOGIN REQUIRED ===");
           console.error("URL:", info.verificationUri);
           console.error("Code:", info.userCode);
-          console.error("Timeout:", info.expiresOn);
+          console.error("Expires in:", info.message.match(/expires?\s+in\s+([\d\s]+minutes?)/i)?.[1] || "15 minutes");
           console.error("=============================\n");
           
           // Speichere Device Code Info für spätere Verwendung
           saveTokenCache({
             deviceCode: info.userCode,
             verificationUri: info.verificationUri,
-            expiresOn: info.expiresOn.toISOString(),
+            timestamp: new Date().toISOString(),
           });
         },
-        // Token Cache Konfiguration
-        tokenCachePersistenceOptions: {
-          enabled: true,
-          name: "teams-mcp-cache",
-          unsafeAllowUnencryptedStorage: true, // Für Container notwendig
-        } as TokenCachePersistenceOptions,
       });
       
-      // Speichere Token nach erfolgreicher Authentifizierung
-      if (this.credential) {
-        this.credential.getToken = async (scopes: string[], options?: any) => {
-          const result = await (this.credential as any).__proto__.getToken.call(this.credential, scopes, options);
-          if (result) {
-            saveTokenCache({
-              accessToken: result.token.substring(0, 20) + "...",
-              expiresOn: result.expiresOnTimestamp,
-              scopes: scopes,
-            });
-          }
-          return result;
-        };
-      }
+      console.error(`Token Cache: ${TOKEN_CACHE_PATH}`);
     }
 
     const scopes = this.getScopes();
@@ -114,10 +95,6 @@ export class TeamsClient {
 
     this.client = Client.initWithMiddleware({ authProvider });
     console.error(`Teams Client initialisiert im "${config.auth.mode}" Modus`);
-    
-    if (config.auth.mode !== "application") {
-      console.error(`Token Cache: ${TOKEN_CACHE_PATH}`);
-    }
   }
 
   private getScopes(): string[] {
