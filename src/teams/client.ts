@@ -1,6 +1,8 @@
 import { Client } from "@microsoft/microsoft-graph-client";
-import { ClientSecretCredential, DeviceCodeCredential } from "@azure/identity";
+import { ClientSecretCredential, DeviceCodeCredential, TokenCachePersistenceOptions } from "@azure/identity";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface TeamsConfig {
   azure: {
@@ -19,6 +21,31 @@ export interface TeamsConfig {
   };
 }
 
+// Token Cache Helper
+const TOKEN_CACHE_PATH = "/app/cache/token-cache.json";
+
+function loadTokenCache(): any {
+  try {
+    if (fs.existsSync(TOKEN_CACHE_PATH)) {
+      return JSON.parse(fs.readFileSync(TOKEN_CACHE_PATH, "utf-8"));
+    }
+  } catch (e) {}
+  return null;
+}
+
+function saveTokenCache(cache: any): void {
+  try {
+    const dir = path.dirname(TOKEN_CACHE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(TOKEN_CACHE_PATH, JSON.stringify(cache, null, 2));
+    console.error("✓ Token Cache gespeichert");
+  } catch (e) {
+    console.error("✗ Token Cache Speicherung fehlgeschlagen:", e);
+  }
+}
+
 export class TeamsClient {
   private client: Client;
   private credential: any;
@@ -34,6 +61,13 @@ export class TeamsClient {
         config.azure.clientSecret
       );
     } else {
+      // Prüfe ob wir bereits einen gespeicherten Token haben
+      const cachedToken = loadTokenCache();
+      
+      if (cachedToken && cachedToken.refreshToken) {
+        console.error("✓ Vorhandener Token Cache gefunden");
+      }
+      
       this.credential = new DeviceCodeCredential({
         tenantId: config.azure.tenantId,
         clientId: config.azure.clientId,
@@ -41,9 +75,38 @@ export class TeamsClient {
           console.error("\n=== DEVICE LOGIN REQUIRED ===");
           console.error("URL:", info.verificationUri);
           console.error("Code:", info.userCode);
+          console.error("Timeout:", info.expiresOn);
           console.error("=============================\n");
+          
+          // Speichere Device Code Info für spätere Verwendung
+          saveTokenCache({
+            deviceCode: info.userCode,
+            verificationUri: info.verificationUri,
+            expiresOn: info.expiresOn.toISOString(),
+          });
         },
+        // Token Cache Konfiguration
+        tokenCachePersistenceOptions: {
+          enabled: true,
+          name: "teams-mcp-cache",
+          unsafeAllowUnencryptedStorage: true, // Für Container notwendig
+        } as TokenCachePersistenceOptions,
       });
+      
+      // Speichere Token nach erfolgreicher Authentifizierung
+      if (this.credential) {
+        this.credential.getToken = async (scopes: string[], options?: any) => {
+          const result = await (this.credential as any).__proto__.getToken.call(this.credential, scopes, options);
+          if (result) {
+            saveTokenCache({
+              accessToken: result.token.substring(0, 20) + "...",
+              expiresOn: result.expiresOnTimestamp,
+              scopes: scopes,
+            });
+          }
+          return result;
+        };
+      }
     }
 
     const scopes = this.getScopes();
@@ -51,6 +114,10 @@ export class TeamsClient {
 
     this.client = Client.initWithMiddleware({ authProvider });
     console.error(`Teams Client initialisiert im "${config.auth.mode}" Modus`);
+    
+    if (config.auth.mode !== "application") {
+      console.error(`Token Cache: ${TOKEN_CACHE_PATH}`);
+    }
   }
 
   private getScopes(): string[] {
